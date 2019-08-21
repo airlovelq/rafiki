@@ -1,0 +1,54 @@
+stages:
+  - analyze
+  - unit-test
+  - integration-test
+
+variables:
+  ENV_K8S_CONF: "scripts/kubernetes/.env.sh"
+
+sonar-scanner-job:
+  image: emeraldsquad/sonar-scanner
+  stage: analyze
+# TODO DELETE: now we create pipeline in dev branch, so not trigger pipeline when edit .gitlab-ci.yml 
+  except:
+    - dev
+#  tags:
+#    - python3-pylint
+  script:
+    - sonar-scanner
+      -Dsonar.projectKey=$CI_SONAR_PROJ
+      -Dsonar.sources=.
+      -Dsonar.host.url=$CI_SONAR_HOST
+      -Dsonar.login=$CI_SONAR_LOGIN
+
+unit-test-job:
+  stage: unit-test
+# TODO DELETE: now we create pipeline in dev branch, so not trigger pipeline when edit .gitlab-ci.yml 
+  except:
+    - dev
+  script:
+    - echo unit-test
+
+integration-test-job:
+  stage: integration-test
+  only:
+    - dev
+    - master
+  tags:
+    - rafiki-ssh-test
+  script:
+    - pwd
+    # Get RAFIKI_VERSION
+    - source $ENV_K8S_CONF
+    - export CI_RAFIKI_VERSION=$RAFIKI_VERSION
+    - cat $CI_K8S_ENV_SH > $ENV_K8S_CONF
+    # Rewrite RAFIKI_VERSION
+    - echo RAFIKI_VERSION=$CI_RAFIKI_VERSION >> $ENV_K8S_CONF
+    # Add Base URL of Python Package Index for accelerate download  python package
+    - sed -ri "s#pip install#pip install -i $CI_PIP_INDEX_URL --trusted-host $CI_PIP_TRUSTED_HOST#g" dockerfiles/*.Dockerfile
+    - source $ENV_K8S_CONF && bash scripts/build_images.sh
+    - source $ENV_K8S_CONF && bash scripts/kubernetes/stop.sh
+    - sleep 60
+    # The performance of the integration test machine was poor, so delayed the stabilization time 
+    - sed -ri 's/60/180/g' scripts/kubernetes/start_stolon.sh
+    - source $ENV_K8S_CONF && bash scripts/kubernetes/start.sh
